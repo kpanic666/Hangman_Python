@@ -5,31 +5,50 @@ GAME_FIELD_MASK = "-"
 
 words_list = frozenset({'python', 'java', 'swift', 'javascript'})
 guessed_word = random.choice(list(words_list))
+guessed_letters = set()
 left_attempts = MAX_ATTEMPTS
 game_field = list(GAME_FIELD_MASK * len(guessed_word))
+win_flag = False
 
 
 def update_game_field(letter):
-    global game_field
+    global game_field, guessed_letters, left_attempts
 
     if letter not in guessed_word:
         print("That letter doesn't appear in the word.")
+        left_attempts -= 1
         return
-    elif letter in game_field:
+    elif letter in guessed_letters:
+        print("No improvements.")
+        left_attempts -= 1
         return
     else:
+        guessed_letters.add(letter)
         for i in range(len(guessed_word)):
             if guessed_word[i] == letter:
                 game_field[i] = letter
 
 
-print("H A N G M A N")
+def check_win_conditions(game_field) -> bool:
+    return True if GAME_FIELD_MASK not in game_field else False
 
-while left_attempts > 0:
+
+def print_game_field(game_field):
     print()
     print(''.join(game_field))
+
+
+print("H A N G M A N")
+
+while left_attempts > 0 and not check_win_conditions(game_field):
+    print_game_field(game_field)
     user_letter = input("Input a letter: ")
     update_game_field(user_letter)
-    left_attempts -= 1
 
-print("\nThanks for playing!")
+if check_win_conditions(game_field):
+    print_game_field(game_field)
+    print("You guessed the word!")
+    print("You survived!")
+else:
+    print()
+    print("You lost!")

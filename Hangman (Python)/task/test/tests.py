@@ -1,6 +1,6 @@
 from typing import List
 
-from hstest import StageTest, dynamic_test, TestedProgram, WrongAnswer, TestPassed, CheckResult
+from hstest import StageTest, dynamic_test, TestedProgram, WrongAnswer, CheckResult
 from string import ascii_lowercase
 from random import shuffle
 
@@ -19,7 +19,7 @@ class IncorrectLettersToOpenOverError(Exception):
     pass
 
 
-class EmptyCorrectLettersToOpenError(Exception):
+class EmptyOpenedLettersError(Exception):
     pass
 
 
@@ -28,6 +28,14 @@ class TriesOverError(Exception):
 
 
 class OutputContainsInputAnnouncementError(Exception):
+    pass
+
+
+class OutputContainsNoImprovementsError(Exception):
+    pass
+
+
+class OutputNotContainsNoImprovementsError(Exception):
     pass
 
 
@@ -43,7 +51,27 @@ class OutputNotContainsIncorrectLetterMessageError(Exception):
     pass
 
 
-class OutputNotContainsThanksMessageError(Exception):
+class OutputContainsSurvivedMessageError(Exception):
+    pass
+
+
+class OutputContainsGuessedWordMessageError(Exception):
+    pass
+
+
+class OutputNotContainsGuessedWordMessageError(Exception):
+    pass
+
+
+class OutputNotContainsSurvivedMessageError(Exception):
+    pass
+
+
+class OutputContainsHangedMessageError(Exception):
+    pass
+
+
+class OutputNotContainsHangedMessageError(Exception):
     pass
 
 
@@ -64,10 +92,13 @@ class GameOverException(Exception):
 
 
 class Config:
+    SURVIVED_MESSAGE = 'You survived!'
+    HANGED_MESSAGE = 'You lost!'
     MAX_TRIES = 8
     INPUT_ANNOUNCEMENT = 'Input a letter'
     INCORRECT_LETTER_MESSAGE = 'That letter doesn\'t appear in the word'
-    THANKS_MESSAGE = 'Thanks for playing!'
+    GUESSED_THE_WORD_MESSAGE = 'You guessed the word!'
+    NO_IMPROVEMENTS_MESSAGE = 'No improvements'
 
     @staticmethod
     def languages():
@@ -93,29 +124,40 @@ class GameState:
         self.program = program
         self.language = language
         self.tries = tries
-        self.correct_letters_to_open = self._language_correct_letters(language) * self.tries
+        self.correct_letters_to_open = self._language_correct_letters(language)
         self.incorrect_letters_to_open = self._language_incorrect_letters(language)
-        self.opened_letters = []
+        self.opened_correct_letters = []
         self.current_letter = None
         self.output = None
-        self.current_language_mask = self._language_mask(language, self.opened_letters)
-        self.prev_language_mask = self._language_mask(language, self.opened_letters)
+        self.current_language_mask = self._language_mask(language, self.opened_correct_letters)
+        self.prev_language_mask = self._language_mask(language, self.opened_correct_letters)
         shuffle(self.correct_letters_to_open)
         shuffle(self.incorrect_letters_to_open)
+        self.correct_letters_to_open *= tries
 
     def open_correct_letter(self):
-        self.current_letter = self._next_correct_letter_to_open()
+        letter = self._next_correct_letter_to_open()
+
+        if letter in self.opened_correct_letters:
+            raise LetterAlreadyOpenedError(letter)
+
+        self.current_letter = letter
         self.output = self.program.execute(self.current_letter).strip()
-
-        if self.current_letter not in self.opened_letters:
-            self.opened_letters.append(self.current_letter)
-
-        self._decrease_tries_count()
+        self.opened_correct_letters.append(self.current_letter)
         self._update_language_mask()
 
     def open_incorrect_letter(self):
         self.current_letter = self._next_incorrect_letter_to_open()
         self.output = self.program.execute(self.current_letter).strip()
+        self._decrease_tries_count()
+        self._update_language_mask()
+
+    def reopen_correct_letter(self):
+        if not len(self.opened_correct_letters):
+            raise EmptyOpenedLettersError()
+
+        letter = self.opened_correct_letters[0]
+        self.output = self.program.execute(letter).strip()
         self._decrease_tries_count()
         self._update_language_mask()
 
@@ -127,7 +169,7 @@ class GameState:
 
     def _update_language_mask(self):
         self.prev_language_mask = self.current_language_mask
-        self.current_language_mask = self._language_mask(self.language, self.opened_letters)
+        self.current_language_mask = self._language_mask(self.language, self.opened_correct_letters)
 
     def _next_correct_letter_to_open(self):
         if len(self.correct_letters_to_open) <= 0:
@@ -143,7 +185,7 @@ class GameState:
 
     @property
     def game_ended(self) -> bool:
-        return self.hanged
+        return self.hanged or self.survived
 
     @property
     def hanged(self) -> bool:
@@ -152,6 +194,10 @@ class GameState:
     @property
     def survived(self) -> bool:
         return self.current_language_mask == self.language
+
+    @property
+    def letters_to_open(self):
+        return len(list(set(self.language))) - len(self.opened_correct_letters)
 
     @classmethod
     def _language_mask(cls, language: str, opened_letters: list):
@@ -189,6 +235,20 @@ class ValidationHelper:
             raise OutputContainsInputAnnouncementError()
 
     @classmethod
+    def output_should_contains_no_improvements_message(cls, output: str):
+        message = Config.NO_IMPROVEMENTS_MESSAGE
+
+        if message.lower() not in output.lower():
+            raise OutputNotContainsNoImprovementsError()
+
+    @classmethod
+    def output_should_not_contains_no_improvements_message(cls, output: str):
+        message = Config.NO_IMPROVEMENTS_MESSAGE
+
+        if message.lower() in output.lower():
+            raise OutputContainsNoImprovementsError()
+
+    @classmethod
     def output_should_contains_incorrect_letter_message(cls, output: str):
         message = Config.INCORRECT_LETTER_MESSAGE
 
@@ -200,14 +260,49 @@ class ValidationHelper:
         message = Config.INCORRECT_LETTER_MESSAGE
 
         if message.lower() in output.lower():
-            raise OutputContainsIncorrectLetterMessageError
+            raise OutputContainsIncorrectLetterMessageError()
 
     @classmethod
-    def output_should_contains_thanks_message(cls, output: str):
-        message = Config.THANKS_MESSAGE
+    def output_should_contains_guessed_the_word_message(cls, output: str):
+        message = Config.GUESSED_THE_WORD_MESSAGE
 
         if message.lower() not in output.lower():
-            raise OutputNotContainsThanksMessageError()
+            raise OutputNotContainsGuessedWordMessageError()
+
+    @classmethod
+    def output_should_not_contains_guessed_the_word_message(cls, output: str):
+        message = Config.GUESSED_THE_WORD_MESSAGE
+
+        if message.lower() in output.lower():
+            raise OutputContainsGuessedWordMessageError()
+
+    @classmethod
+    def output_should_contains_survived_message(cls, output: str):
+        message = Config.SURVIVED_MESSAGE
+
+        if message.lower() not in output.lower():
+            raise OutputNotContainsSurvivedMessageError()
+
+    @classmethod
+    def output_should_contains_hanged_message(cls, output: str):
+        message = Config.HANGED_MESSAGE
+
+        if message.lower() not in output.lower():
+            raise OutputNotContainsHangedMessageError()
+
+    @classmethod
+    def output_should_not_contains_hanged_message(cls, output: str):
+        message = Config.HANGED_MESSAGE
+
+        if message.lower() in output.lower():
+            raise OutputContainsHangedMessageError()
+
+    @classmethod
+    def output_should_not_contains_survived_message(cls, output: str):
+        message = Config.SURVIVED_MESSAGE
+
+        if message.lower() in output.lower():
+            raise OutputContainsSurvivedMessageError()
 
     @classmethod
     def validate_min_lines_count(cls, lines: list, lines_count: int):
@@ -248,7 +343,7 @@ class FirstBlockLanguageMaskParser:
 
         if language is None:
             raise WrongAnswer(f"Cannot recognize a word from the mask \"{self.mask}\". "
-                              f"Did you only use the words from the description?")
+                              f"Did you use only the words from the description?")
 
         return language
 
@@ -280,15 +375,19 @@ class GameCommand:
             self.verify_on_game_end()
             self.validate_mask_transition()
             self.validate_output()
+        except EmptyOpenedLettersError:
+            pass
         except OutputNotContainsInputAnnouncementError:
             raise WrongAnswer("The output doesn't contain any \"Input a letter\" lines.")
+        except OutputContainsInputAnnouncementError:
+            raise WrongAnswer(f"The last block should not contain text \"{Config.INPUT_ANNOUNCEMENT}\".")
         except OutputContainsIncorrectLetterMessageError:
             raise WrongAnswer(f"The output contains \"{Config.INCORRECT_LETTER_MESSAGE}\" message, "
                               f"but a letter \"{self.state.current_letter}\" "
                               f"is present in the word \"{self.state.language}\".")
         except OutputNotContainsIncorrectLetterMessageError:
             raise WrongAnswer(f"The output doesn't contain \"{Config.INCORRECT_LETTER_MESSAGE}\" message, "
-                              f"but a letter \"{self.state.current_letter}\" doesn't appear"
+                              f"but a letter \"{self.state.current_letter}\" doesn\'t appear"
                               f" in the word \"{self.state.language}\".")
         except IncorrectMaskTransitionError:
             raise WrongAnswer(f'Incorrect mask transition. Cannot find correct mask in the output:\n'
@@ -296,11 +395,39 @@ class GameCommand:
                               f'Letter: {self.state.current_letter}\n'
                               f'Previous mask: {self.state.prev_language_mask}\n'
                               f'Correct current mask: {self.state.current_language_mask}\n')
+        except OutputContainsHangedMessageError:
+            raise WrongAnswer(f"The output shouldn't contain \"{Config.HANGED_MESSAGE}\" message. "
+                              f"Please, make sure that all the tries have been used and \"{Config.HANGED_MESSAGE}\" "
+                              "message is really the right type to be used here.")
+        except OutputNotContainsHangedMessageError:
+            raise WrongAnswer(f'The user is hanged, but there is no \"{Config.HANGED_MESSAGE}\" message in the output.')
+        except OutputContainsSurvivedMessageError:
+            raise WrongAnswer(f'The user survived, but there are {self.state.letters_to_open} letters to open.')
+        except OutputNotContainsSurvivedMessageError:
+            raise WrongAnswer(f'The user survived, but there is no \"{Config.SURVIVED_MESSAGE}\" message in the output.')
+        except OutputNotContainsGuessedWordMessageError:
+            raise WrongAnswer(
+                f'The user survived. The last block should contain text \"{Config.GUESSED_THE_WORD_MESSAGE}\".')
+        except OutputContainsGuessedWordMessageError:
+            raise WrongAnswer(
+                f'The user is hanged. The last block should not contain text \"{Config.GUESSED_THE_WORD_MESSAGE}\".'
+            )
+        except OutputContainsNoImprovementsError:
+            raise WrongAnswer(f'The output contains \"{Config.NO_IMPROVEMENTS_MESSAGE}\" message, '
+                              f'but a letter \"{self.state.current_letter}\" hasn\'t been suggested yet'
+                              f' for the word \"{self.state.language}\".')
+        except OutputNotContainsNoImprovementsError:
+            raise WrongAnswer(f'The output doesn\'t contain \"{Config.NO_IMPROVEMENTS_MESSAGE}\" message, '
+                              f'but a letter \"{self.state.current_letter}\" has already been suggested '
+                              f'for the word \"{self.state.language}\".')
 
     def change_state(self):
         pass
 
     def validate_output(self):
+        pass
+
+    def validate_end_game_output(self):
         pass
 
     def validate_mask_transition(self):
@@ -310,11 +437,17 @@ class GameCommand:
             if line.strip() == self.state.current_language_mask:
                 return
 
+        if self.state.tries != 0 and 'you lost' in line.lower():
+            raise WrongAnswer('Please, make sure that the tries are counted correctly.')
+
         raise IncorrectMaskTransitionError
 
     def verify_on_game_end(self):
-        if self.state.game_ended:
-            raise GameOverException
+        if not self.state.game_ended:
+            return
+
+        self.validate_end_game_output()
+        raise GameOverException
 
     @classmethod
     def _get_lines_from_output(cls, output: str):
@@ -330,6 +463,17 @@ class OpenCorrectLetterCommand(GameCommand):
         output = self.state.output
         self.helper.output_should_contains_input_announcement(output)
         self.helper.output_should_not_contains_incorrect_letter_message(output)
+        self.helper.output_should_not_contains_hanged_message(output)
+        self.helper.output_should_not_contains_survived_message(output)
+        self.helper.output_should_not_contains_no_improvements_message(output)
+
+    def validate_end_game_output(self):
+        output = self.state.output
+        self.helper.output_should_not_contains_input_announcement(output)
+        self.helper.output_should_not_contains_hanged_message(output)
+        self.helper.output_should_contains_survived_message(output)
+        self.helper.output_should_contains_guessed_the_word_message(output)
+        self.helper.output_should_not_contains_no_improvements_message(output)
 
 
 class OpenIncorrectLetterCommand(GameCommand):
@@ -341,78 +485,173 @@ class OpenIncorrectLetterCommand(GameCommand):
         output = self.state.output
         self.helper.output_should_contains_input_announcement(output)
         self.helper.output_should_contains_incorrect_letter_message(output)
+        self.helper.output_should_not_contains_hanged_message(output)
+        self.helper.output_should_not_contains_survived_message(output)
+        self.helper.output_should_not_contains_no_improvements_message(output)
+
+    def validate_end_game_output(self):
+        output = self.state.output
+        self.helper.output_should_not_contains_input_announcement(output)
+        self.helper.output_should_not_contains_survived_message(output)
+        self.helper.output_should_contains_hanged_message(output)
+        self.helper.output_should_not_contains_guessed_the_word_message(output)
+        self.helper.output_should_not_contains_no_improvements_message(output)
+
+
+class ReopenCorrectLetterCommand(GameCommand):
+
+    def change_state(self):
+        self.state.reopen_correct_letter()
+
+    def validate_output(self):
+        output = self.state.output
+        self.helper.output_should_contains_input_announcement(output)
+        self.helper.output_should_not_contains_hanged_message(output)
+        self.helper.output_should_not_contains_survived_message(output)
+        self.helper.output_should_contains_no_improvements_message(output)
+
+    def validate_end_game_output(self):
+        output = self.state.output
+        self.helper.output_should_not_contains_input_announcement(output)
+        self.helper.output_should_contains_hanged_message(output)
+        self.helper.output_should_not_contains_survived_message(output)
+        self.helper.output_should_contains_no_improvements_message(output)
+
+
+class TestCommandsCollection:
+
+    @classmethod
+    def survived(cls):
+        language_lengths = [len(language) for language in Config.languages()]
+        max_length = max(language_lengths)
+        valid_commands = [OpenCorrectLetterCommand() for _ in range(max_length)]
+        invalid_commands = [OpenIncorrectLetterCommand() for _ in range(3)]
+        invalid_commands += [ReopenCorrectLetterCommand() for _ in range(2)]
+        commands = valid_commands + invalid_commands
+        shuffle(commands)
+
+        return commands
+
+    @classmethod
+    def hanged(cls):
+        language_lengths = [len(language) for language in Config.languages()]
+        min_length = min(language_lengths)
+        valid_commands = [OpenCorrectLetterCommand() for _ in range(min_length - 1)]
+        invalid_commands = [OpenIncorrectLetterCommand() for _ in range(Config.MAX_TRIES)]
+        commands = valid_commands + invalid_commands
+        shuffle(commands)
+
+        return commands
+
+    @classmethod
+    def no_improvements(cls):
+        return [
+            OpenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            OpenIncorrectLetterCommand(),
+            OpenIncorrectLetterCommand(),
+            OpenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+            ReopenCorrectLetterCommand(),
+        ]
 
 
 class HangmanTest(StageTest):
 
     def __init__(self, source_name: str = ''):
         super().__init__(source_name)
-        self.helper = ValidationHelper
-        self.history = {language: False for language in Config.languages()}
+        self.helper = ValidationHelper()
+        self.survived_history = {language: False for language in Config.languages()}
+        self.hanged_history = {language: False for language in Config.languages()}
+        self.no_improvements_history = {language: False for language in Config.languages()}
 
     @dynamic_test(order=1, repeat=100)
-    def test_game_loop(self):
+    def test_all_languages_from_description_should_can_be_guessed(self):
+        if self._all_languages_from_description_was_guessed_at_least_once():
+            return CheckResult.correct()
+
         pr = TestedProgram(self.source_name)
         first_block = pr.start().strip()
         parser = FirstBlockLanguageMaskParser(first_block)
         language = parser.parse()
-
-        if self._language_was_presented(language):
-            return CheckResult.correct()
-
         game_state = GameState(program=pr, language=language, tries=Config.MAX_TRIES)
-        state_handlers = [
-            OpenCorrectLetterCommand(),
-            OpenIncorrectLetterCommand(),
-            OpenCorrectLetterCommand(),
-            OpenCorrectLetterCommand(),
-            OpenIncorrectLetterCommand(),
-            OpenCorrectLetterCommand(),
-            OpenIncorrectLetterCommand(),
-            OpenIncorrectLetterCommand(),
-        ]
-
-        shuffle(state_handlers)
-
-        self._run_game_handlers(state_handlers, game_state)
-        self._validate_last_block(game_state.output)
-        self._store_language_to_history(language)
+        commands = TestCommandsCollection.survived()
+        self._run_commands(commands, game_state)
+        self._store_language_to_survived_history(language)
 
         return CheckResult.correct()
 
     @dynamic_test(order=2)
-    def test_all_languages_from_description_should_be_presented_at_least_once(self):
-        if self._all_languages_from_description_was_presented_at_least_once():
+    def test_all_languages_from_description_should_be_guessed_at_least_once(self):
+        if self._all_languages_from_description_was_guessed_at_least_once():
             return CheckResult.correct()
 
         raise WrongAnswer("It looks like your program is not using "
                           "all of the words to guess from the list in the description.")
 
-    def _all_languages_from_description_was_presented_at_least_once(self):
-        return all(self.history.values())
+    @dynamic_test(order=3, repeat=100)
+    def test_all_languages_from_description_should_be_incorrect_at_least_once(self):
+        if self._all_languages_from_description_was_incorrect_at_least_once():
+            return CheckResult.correct()
 
-    def _language_was_presented(self, language: str):
-        return self.history.get(language, False)
+        pr = TestedProgram(self.source_name)
+        first_block = pr.start().strip()
+        parser = FirstBlockLanguageMaskParser(first_block)
+        language = parser.parse()
+        game_state = GameState(program=pr, language=language, tries=Config.MAX_TRIES)
+        commands = TestCommandsCollection.hanged()
+        self._run_commands(commands, game_state)
+        self._store_language_to_hanged_history(language)
+
+        return CheckResult.correct()
+
+    @dynamic_test(order=4, repeat=100)
+    def test_all_languages_from_description_should_has_no_improvements_at_least_once(self):
+        if self._all_languages_from_description_has_no_improvements_at_least_once():
+            return CheckResult.correct()
+
+        pr = TestedProgram(self.source_name)
+        first_block = pr.start().strip()
+        parser = FirstBlockLanguageMaskParser(first_block)
+        language = parser.parse()
+        game_state = GameState(program=pr, language=language, tries=Config.MAX_TRIES)
+        commands = TestCommandsCollection.no_improvements()
+        self._run_commands(commands, game_state)
+        self._store_no_improvements_history(language)
+
+        return CheckResult.correct()
+
+    def _store_language_to_survived_history(self, language: str):
+        self.survived_history[language] = True
+
+    def _store_language_to_hanged_history(self, language: str):
+        self.hanged_history[language] = True
+
+    def _store_no_improvements_history(self, language: str):
+        self.no_improvements_history[language] = True
+
+    def _all_languages_from_description_was_guessed_at_least_once(self):
+        return all(self.survived_history.values())
+
+    def _all_languages_from_description_was_incorrect_at_least_once(self):
+        return all(self.hanged_history.values())
+
+    def _all_languages_from_description_has_no_improvements_at_least_once(self):
+        return all(self.no_improvements_history.values())
 
     @classmethod
-    def _run_game_handlers(cls, handlers: list, game_state: GameState):
+    def _run_commands(cls, commands: List[GameCommand], game_state: GameState):
         try:
-            for handler in handlers:
-                handler.handle(game_state)
+            for command in commands:
+                command.handle(game_state)
         except GameOverException:
             pass
-
-    def _validate_last_block(self, output: str):
-        try:
-            self.helper.output_should_contains_thanks_message(output)
-            self.helper.output_should_not_contains_input_announcement(output)
-        except OutputNotContainsThanksMessageError:
-            raise WrongAnswer(f"The last block should contain text \"{Config.THANKS_MESSAGE}\".")
-        except OutputContainsInputAnnouncementError:
-            raise WrongAnswer(f"The last block should not contain text \"{Config.INPUT_ANNOUNCEMENT}\".")
-
-    def _store_language_to_history(self, language: str):
-        self.history[language] = True
 
 
 if __name__ == '__main__':
