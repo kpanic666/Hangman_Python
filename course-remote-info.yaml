@@ -26,7 +26,7 @@ stages:
     is_completed: true
   - id: 378
     step: 6088
-    is_completed: false
+    is_completed: true
   - id: 379
     step: 6089
     is_completed: false
